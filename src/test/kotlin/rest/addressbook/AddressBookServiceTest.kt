@@ -39,6 +39,11 @@ class AddressBookServiceTest {
         // Verify that GET /contacts is well implemented by the service, i.e
         // complete the test to ensure that it is safe and idempotent
         //////////////////////////////////////////////////////////////////////
+
+        // Ensuring that GET /contacts is safe and idempotent means that personList
+        // should be empty and nextId should be 1
+        assert(addressBook.personList.isEmpty())
+        assertEquals(1, addressBook.nextId)
     }
 
     @Test
@@ -46,7 +51,7 @@ class AddressBookServiceTest {
 
         // Prepare data
         val juan = Person(name = "Juan")
-        val juanURI: URI = URI.create("http://localhost:$port/contacts/person/1")
+        var juanURI: URI = URI.create("http://localhost:$port/contacts/person/1")
 
         // Create a new user
         var response = restTemplate.postForEntity("http://localhost:$port/contacts", juan, Person::class.java)
@@ -73,6 +78,23 @@ class AddressBookServiceTest {
         // Verify that POST /contacts is well implemented by the service, i.e
         // complete the test to ensure that it is not safe and not idempotent
         //////////////////////////////////////////////////////////////////////
+
+        // Ensuring that POST /contacts is not safe means that the POST request
+        // should have changed the state of personList and the person should be "Juan"
+        assertEquals(addressBook.personList.size, 1)
+        assertEquals(addressBook.personList.count { person -> person.name == "Juan" }, 1)
+
+        // Ensuring that POST /contacts is not idempotent means that a second request
+        // identical to the last one should change the server state again.
+        response = restTemplate.postForEntity("http://localhost:$port/contacts", juan, Person::class.java)
+        juanURI = URI.create("http://localhost:$port/contacts/person/2")
+        assertEquals(201, response.statusCode.value())
+        assertEquals(juanURI, response.headers.location)
+        assertEquals(MediaType.APPLICATION_JSON, response.headers.contentType)
+        juanUpdated = response.body
+        assertEquals(juan.name, juanUpdated?.name)
+        assertEquals(2, juanUpdated?.id)
+        assertEquals(juanURI, juanUpdated?.href)
     }
 
     @Test
@@ -103,6 +125,10 @@ class AddressBookServiceTest {
         assertEquals(3, mariaUpdated?.id)
         assertEquals(mariaURI, mariaUpdated?.href)
 
+        // toMutableList to get a copy of the list, otherwise, it would return a pointer to the list
+        val personListBefore = addressBook.personList.toMutableList()
+        val nextIdBefore = addressBook.nextId
+
         // Check that the new user exists
         response = restTemplate.getForEntity(mariaURI, Person::class.java)
 
@@ -117,6 +143,11 @@ class AddressBookServiceTest {
         // Verify that GET /contacts/person/3 is well implemented by the service, i.e
         // complete the test to ensure that it is safe and idempotent
         //////////////////////////////////////////////////////////////////////
+
+        // Ensuring that GET request is safe and idempotent means that addressBook
+        // remains the same as before making doing that request
+        assertEquals(personListBefore, addressBook.personList)
+        assertEquals(nextIdBefore, addressBook.nextId)
     }
 
     @Test
@@ -127,6 +158,9 @@ class AddressBookServiceTest {
         val juan = Person(name = "Juan", id = addressBook.nextId())
         addressBook.personList.add(salvador)
         addressBook.personList.add(juan)
+
+        val personListBefore = addressBook.personList.toMutableList()
+        val nextIdBefore = addressBook.nextId
 
         // Test list of contacts
         val response = restTemplate.getForEntity("http://localhost:$port/contacts", Array<Person>::class.java)
@@ -139,6 +173,11 @@ class AddressBookServiceTest {
         // Verify that GET /contacts is well implemented by the service, i.e
         // complete the test to ensure that it is safe and idempotent
         //////////////////////////////////////////////////////////////////////
+
+        // Ensuring that GET /contacts is safe and idempotent means that addressBook
+        // remains the same as before the GET request
+        assertEquals(personListBefore, addressBook.personList)
+        assertEquals(nextIdBefore, addressBook.nextId)
     }
 
     @Test
@@ -178,6 +217,19 @@ class AddressBookServiceTest {
         // Verify that PUT /contacts/person/2 is well implemented by the service, i.e
         // complete the test to ensure that it is idempotent but not safe
         //////////////////////////////////////////////////////////////////////
+
+        // Ensuring that PUT /contacts/person/2 is not safe means that
+        // the request should modify addressBook
+        assertEquals(1, addressBook.personList.filter{ person -> person.name == "Maria"}.size)
+        // "Juan" no longer exists
+        assertEquals(0, addressBook.personList.filter{ person -> person.name == "Juan"}.size)
+        assertEquals(addressBook.nextId,3)
+
+        // Ensuring that PUT /contacts/person/2 is idempotent means that
+        // the same request produces the same result
+        restTemplate.exchange(juanURI, HttpMethod.PUT, HttpEntity(maria), Person::class.java)
+        assertEquals(1, addressBook.personList.filter{ person -> person.name == "Maria"}.size)
+        assertEquals(addressBook.nextId,3)
     }
 
     @Test
@@ -199,6 +251,18 @@ class AddressBookServiceTest {
         // Verify that DELETE /contacts/person/2 is well implemented by the service, i.e
         // complete the test to ensure that it is idempotent but not safe
         //////////////////////////////////////////////////////////////////////
+
+        // Ensuring that DELETE /contacts/person/2 is not safe means that
+        // the request will change the server state
+        // "Juan" no longer exists
+        assertEquals(0, addressBook.personList.filter{ person -> person.name == "Juan"}.size)
+        assertEquals(addressBook.nextId,3)
+
+        // Ensuring that DELETE /contacts/person/2 is idempotent means that
+        // the same request will not affect the server state
+        restTemplate.execute(juanURI, HttpMethod.DELETE, {}, {})
+        assertEquals(0, addressBook.personList.filter{ person -> person.name == "Juan"}.size)
+        assertEquals(addressBook.nextId,3)
     }
 
     @Test
